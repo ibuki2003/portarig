@@ -20,12 +20,14 @@ target_include_directories(${target_name} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRE
 target_link_libraries(${target_name} PRIVATE
   pico_stdlib
   pico_stdio
+  tinyusb_device
+  tinyusb_board
   hardware_pio
   hardware_irq
   hardware_dma
   )
 
-pico_enable_stdio_usb(${target_name} 1)
+pico_enable_stdio_usb(${target_name} 0)
 pico_enable_stdio_uart(${target_name} 0)
 
 # create map/bin/hex/uf2 file etc.
