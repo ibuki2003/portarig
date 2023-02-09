@@ -5,11 +5,12 @@
  */
 
 #include <stdint.h>
-#include "hardware/structs/uart.h"
-#include "pico/stdlib.h"
+#include <pico/stdlib.h>
+#include <tusb_config.h>
+#include <bsp/board.h>
 
-#include "bsp/board.h"
-#include "tusb_config.h"
+#include <commands.h>
+#include <panel_serial.h>
 
 const uint LED_PIN = 25;
 
@@ -35,22 +36,12 @@ int main() {
 
     while (1) {
         tud_task(); // tinyusb device task
-        cdc_task();
-    }
 
-}
+        commands_task(); // process commands
 
-static void cdc_task(void) {
-    uint8_t itf;
-    for (itf = 0; itf < CFG_TUD_CDC; itf++) {
-        if (tud_cdc_n_available(itf)) {
+        if (tud_cdc_n_available(1)) {
             uint8_t buf[64];
-            uint32_t count = tud_cdc_n_read(itf, buf, sizeof(buf));
-
-            // echo back
-            tud_cdc_n_write(itf, buf, count);
-            tud_cdc_n_write_flush(itf);
+            uint32_t count = tud_cdc_n_read(1, buf, sizeof(buf));
         }
     }
-
 }
