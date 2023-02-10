@@ -9,8 +9,11 @@ uint16_t panel_tx_queue_tail = 0;
 
 #define PANEL_RX_BUF_SIZE 1024
 uint8_t rx_buf[PANEL_RX_BUF_SIZE];
-uint16_t rx_count = 0;
+uint16_t rx_head = 0;
+uint16_t rx_tail = 0;
 bool rx_valid = true; // false if error found reading message
+
+uint16_t rx_push_tail = 0; // push_tail .. tail is the message to be pushed
 
 inline extern bool panel_putc(char c);
 
@@ -47,12 +50,32 @@ void panel_flush() {
   }
 }
 
+void panel_task() {
+  if (rx_push_tail != rx_tail) {
+    const uint16_t rx_tail_= rx_tail; // copy
+    uint16_t rx_count = (rx_tail_ + PANEL_RX_BUF_SIZE - rx_push_tail) % PANEL_RX_BUF_SIZE;
+
+    commands_tx_push(COMMAND_PREAMBLE);
+    commands_tx_push(COMMAND_TYPE_PANEL_SERIAL);
+    commands_tx_push(rx_count & 0xff);
+    commands_tx_push((rx_count >> 8) & 0xff);
+    while (rx_push_tail != rx_tail_) {
+      commands_tx_push(rx_buf[rx_push_tail++]);
+      rx_push_tail %= PANEL_RX_BUF_SIZE;
+    }
+  }
+}
+
 static void panel_irq_handler() {
-  if (uart0_hw->ris & (UART_UARTRIS_RXRIS_BITS | 0)) {
+  if (uart0_hw->ris & UART_UARTRIS_RXRIS_BITS) {
     while (uart_is_readable(uart0)) {
       const uint8_t ch = uart_getc(uart0);
-      if (rx_valid && rx_count < PANEL_RX_BUF_SIZE) {
-        rx_buf[rx_count++] = ch;
+      if (rx_valid) {
+        rx_buf[rx_head++] = ch;
+        rx_head %= PANEL_RX_BUF_SIZE;
+        if (rx_head == rx_push_tail) {
+          rx_valid = false;
+        }
       }
     }
   }
@@ -77,7 +100,6 @@ static void panel_irq_handler() {
         UART_UARTRIS_FERIS_BITS
         )) {
     // error
-    rx_count = 0;
     rx_valid = false;
     uart0_hw->icr = UART_UARTICR_OEIC_BITS
       | UART_UARTICR_BEIC_BITS
@@ -87,29 +109,27 @@ static void panel_irq_handler() {
   }
 
   if (uart0_hw->ris & UART_UARTRIS_RTRIS_BITS) {
+    uart0_hw->icr = UART_UARTICR_RTIC_BITS;
     // end of RX message
 
     // empty RX buffer
     // TODO: remove duplicate code
     while (uart_is_readable(uart0)) {
       const uint8_t ch = uart_getc(uart0);
-      if (rx_valid && rx_count < PANEL_RX_BUF_SIZE) {
-        rx_buf[rx_count++] = ch;
+      if (rx_valid) {
+        rx_buf[rx_head++] = ch;
+        rx_head %= PANEL_RX_BUF_SIZE;
+        if (rx_head == rx_push_tail) {
+          rx_valid = false;
+        }
       }
     }
 
     if (rx_valid) {
-      // REVIEW: is pushing too slow to IRQ handler?
-      commands_tx_push(COMMAND_PREAMBLE);
-      commands_tx_push('P');
-      commands_tx_push(rx_count & 0xff);
-      commands_tx_push((rx_count >> 8) & 0xff);
-      for (uint i = 0; i < rx_count; ++i) {
-        commands_tx_push(rx_buf[i]);
-      }
+      rx_tail = rx_head;
+    } else {
+      rx_head = rx_tail;
     }
-    rx_count = 0;
     rx_valid = true;
-    uart0_hw->icr = UART_UARTICR_RTIC_BITS;
   }
 }

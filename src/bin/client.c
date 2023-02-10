@@ -41,6 +41,7 @@ int main() {
         tud_task(); // tinyusb device task
 
         commands_task(); // process commands
+        panel_task();
 
         if (tud_cdc_n_available(1)) {
             uint8_t buf[64];

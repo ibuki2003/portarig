@@ -47,6 +47,7 @@ inline bool commands_rx_push(uint8_t c) {
 }
 
 // push commands to send buffer
+// WARNING: this function is not thread safe, do not call from interrupt
 inline bool commands_tx_push(uint8_t c) {
   // TODO: timeout
   const uint16_t next_head = (commands_tx_head + 1) % COMMANDS_TX_QUEUE_SIZE;

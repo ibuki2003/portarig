@@ -38,10 +38,8 @@ inline bool panel_putc(char c) {
 */
 void panel_flush();
 
-// NOTE: sending task can be IRQ task, so this is not needed
-///*
-//   Serial port main loop task
-//   send data from tx queue
-//*/
-//void panel_task();
-
+/*
+ Serial port main loop task
+ send data from tx queue
+*/
+void panel_task();
