@@ -34,6 +34,9 @@ int main() {
     repeating_timer_t timer;
     add_repeating_timer_ms(-500, alarm_irq, NULL, &timer);
 
+    commands_init();
+    panel_setup();
+
     while (1) {
         tud_task(); // tinyusb device task
 
