@@ -12,6 +12,8 @@ uint8_t rx_buf[PANEL_RX_BUF_SIZE];
 uint16_t rx_count = 0;
 bool rx_valid = true; // false if error found reading message
 
+inline extern bool panel_putc(char c);
+
 static void panel_irq_handler();
 
 void panel_setup() {

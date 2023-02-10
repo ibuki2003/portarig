@@ -2,6 +2,9 @@
 #include "commands/usb.h"
 #include "panel_serial.h"
 
+inline extern bool commands_rx_push(uint8_t c);
+inline extern bool commands_tx_push(uint8_t c);
+
 uint8_t COMMANDS_TX_QUEUE[COMMANDS_TX_QUEUE_SIZE];
 uint16_t commands_tx_head;
 uint16_t commands_tx_tail;
@@ -23,7 +26,7 @@ typedef enum ParseState {
     PARSE_ERROR,
 } ParseResult;
 
-inline ParseResult parse_command_panel_serial(uint len);
+inline extern ParseResult parse_command_panel_serial(uint len);
 
 void commands_task() {
     command_usb_task();
