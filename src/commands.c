@@ -35,30 +35,31 @@ void commands_task() {
     // skip until header
     while (commands_rx_head != commands_rx_tail) {
         if (COMMANDS_RX_BUFFER[commands_rx_tail] != COMMAND_PREAMBLE) {
-
-            uint len = (commands_rx_head + COMMANDS_RX_BUFFER_SIZE - commands_rx_tail) % COMMANDS_RX_BUFFER_SIZE;
-            if (len >= 3) { // preamble + type + content
-                uint8_t type = COMMANDS_RX_BUFFER[(commands_rx_tail + 1) % COMMANDS_RX_BUFFER_SIZE];
-
-                ParseResult result = PARSE_ERROR;
-                switch (type) {
-                case COMMAND_TYPE_PANEL_SERIAL:
-                    result = parse_command_panel_serial(len);
-                    break;
-                }
-                switch (result) {
-                case PARSE_OK:
-                case NOT_ENOUGH_DATA:
-                    // nothing to do
-                    break;
-                case PARSE_ERROR:
-                    // skip header
-                    commands_rx_tail = (commands_rx_tail + 1) % COMMANDS_RX_BUFFER_SIZE;
-                    break;
-                }
-            }
+            commands_rx_tail = (commands_rx_tail + 1) % COMMANDS_RX_BUFFER_SIZE;
+            continue;
         }
-        commands_rx_tail = (commands_rx_tail + 1) % COMMANDS_RX_BUFFER_SIZE;
+        bool cont = true;
+
+        uint len = (commands_rx_head + COMMANDS_RX_BUFFER_SIZE - commands_rx_tail) % COMMANDS_RX_BUFFER_SIZE;
+        if (len >= 3) { // preamble + type + content
+            uint8_t type = COMMANDS_RX_BUFFER[(commands_rx_tail + 1) % COMMANDS_RX_BUFFER_SIZE];
+
+            ParseResult result = PARSE_ERROR;
+            switch (type) {
+            case COMMAND_TYPE_PANEL_SERIAL: result = parse_command_panel_serial(len); break;
+            }
+            switch (result) {
+            case PARSE_OK: break; // nothing to do; each parser advances the tail
+            case NOT_ENOUGH_DATA:
+                cont = false; // parse again at next time
+                break;
+            case PARSE_ERROR:
+                // skip header
+                commands_rx_tail = (commands_rx_tail + 1) % COMMANDS_RX_BUFFER_SIZE;
+                break;
+            }
+        } else break;
+        if (!cont) break;
     }
 
     // TODO: switch interface dynamically
@@ -69,6 +70,7 @@ void commands_task() {
 }
 
 inline ParseResult parse_command_panel_serial(uint len) {
+    if (len < 4) return NOT_ENOUGH_DATA; // preamble + type + sizex2
     const uint size = (
             (uint)COMMANDS_RX_BUFFER[(commands_rx_tail + 2) % COMMANDS_RX_BUFFER_SIZE] |
             ((uint)COMMANDS_RX_BUFFER[(commands_rx_tail + 3) % COMMANDS_RX_BUFFER_SIZE] << 8)
