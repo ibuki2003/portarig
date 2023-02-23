@@ -1,13 +1,16 @@
 #include "commands.h"
+#include "class/cdc/cdc_device.h"
 #include "commands/usb.h"
+#include "device/usbd.h"
 #include "panel_serial.h"
 
 inline extern bool commands_rx_push(uint8_t c);
-inline extern bool commands_tx_push(uint8_t c);
+inline extern bool commands_tx_push(CommandPacket c);
 
-uint8_t COMMANDS_TX_QUEUE[COMMANDS_TX_QUEUE_SIZE];
+CommandPacket COMMANDS_TX_QUEUE[COMMANDS_TX_QUEUE_SIZE];
 uint16_t commands_tx_head;
 uint16_t commands_tx_tail;
+uint16_t commands_tx_cursor;
 
 uint8_t COMMANDS_RX_BUFFER[COMMANDS_RX_BUFFER_SIZE];
 uint16_t commands_rx_head;
@@ -16,6 +19,8 @@ uint16_t commands_rx_tail;
 void commands_init() {
   commands_tx_head = 0;
   commands_tx_tail = 0;
+  commands_tx_cursor = 0;
+
   commands_rx_head = 0;
   commands_rx_tail = 0;
 }
@@ -63,9 +68,24 @@ void commands_task() {
     }
 
     // TODO: switch interface dynamically
+
     while (commands_tx_head != commands_tx_tail) {
-        command_usb_write(COMMANDS_TX_QUEUE[commands_tx_tail]);
-        commands_tx_tail = (commands_tx_tail + 1) % COMMANDS_TX_QUEUE_SIZE;
+        uint n = tud_cdc_n_write_available(0);
+        if (n) {
+            if (COMMANDS_TX_QUEUE[commands_tx_tail].length - commands_tx_cursor < n) {
+                n = COMMANDS_TX_QUEUE[commands_tx_tail].length - commands_tx_cursor;
+            }
+
+            commands_tx_cursor += tud_cdc_n_write(0, COMMANDS_TX_QUEUE[commands_tx_tail].data + commands_tx_cursor, n);
+            if (commands_tx_cursor >= COMMANDS_TX_QUEUE[commands_tx_tail].length) {
+                free(COMMANDS_TX_QUEUE[commands_tx_tail].data);
+                commands_tx_tail = (commands_tx_tail + 1) % COMMANDS_TX_QUEUE_SIZE;
+                commands_tx_cursor = 0;
+            }
+        }
+
+        tud_task();
+        tud_cdc_n_write_flush(0);
     }
 }
 
@@ -81,13 +101,18 @@ inline ParseResult parse_command_panel_serial(uint len) {
     if (len < size + 4) return NOT_ENOUGH_DATA;
 
     // we have a full packet
-    uint end = (commands_rx_tail + 4 + size) % COMMANDS_RX_BUFFER_SIZE;
     commands_rx_tail = (commands_rx_tail + 4) % COMMANDS_RX_BUFFER_SIZE;
-    while (commands_rx_tail != end) {
-        panel_putc(COMMANDS_RX_BUFFER[commands_rx_tail]);
+    PanelPacket packet;
+    packet.length = size;
+    packet.data = malloc(sizeof(uint8_t) * size);
+    for (uint i = 0; i < size; i++) {
+        packet.data[i] = COMMANDS_RX_BUFFER[commands_rx_tail];
         commands_rx_tail = (commands_rx_tail + 1) % COMMANDS_RX_BUFFER_SIZE;
     }
-    panel_flush();
+    if (!panel_push(packet)) {
+        // just drop the packet
+        free(packet.data);
+    }
 
     return PARSE_OK;
 }

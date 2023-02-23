@@ -2,6 +2,9 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdlib.h>
+
+#include <segment.h>
 
 /*
   Command Structure
@@ -17,10 +20,12 @@ enum CommandType {
   COMMAND_TYPE_PANEL_SERIAL = 'P',
 };
 
-#define COMMANDS_TX_QUEUE_SIZE 1024
+typedef Segment CommandPacket;
+
+#define COMMANDS_TX_QUEUE_SIZE 64
 #define COMMANDS_RX_BUFFER_SIZE 1024
 
-extern uint8_t COMMANDS_TX_QUEUE[COMMANDS_TX_QUEUE_SIZE];
+extern CommandPacket COMMANDS_TX_QUEUE[COMMANDS_TX_QUEUE_SIZE];
 extern uint16_t commands_tx_head;
 extern uint16_t commands_tx_tail;
 
@@ -48,8 +53,13 @@ inline bool commands_rx_push(uint8_t c) {
 
 // push commands to send buffer
 // WARNING: this function is not thread safe, do not call from interrupt
-inline bool commands_tx_push(uint8_t c) {
-  // TODO: timeout
+inline bool commands_tx_push(CommandPacket c) {
+  if (
+    c.length < 2 ||
+    c.data == NULL ||
+    c.data[0] != COMMAND_PREAMBLE
+  ) return false; // invalid command
+
   const uint16_t next_head = (commands_tx_head + 1) % COMMANDS_TX_QUEUE_SIZE;
   if (next_head == commands_tx_tail) return false; // buffer full
   COMMANDS_TX_QUEUE[commands_tx_head] = c;

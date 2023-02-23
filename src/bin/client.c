@@ -33,6 +33,7 @@ int main() {
 
     repeating_timer_t timer;
     add_repeating_timer_ms(-500, alarm_irq, NULL, &timer);
+    alarm_pool_init_default();
 
     commands_init();
     panel_setup();

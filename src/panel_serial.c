@@ -1,21 +1,28 @@
 #include "panel_serial.h"
+#include "pico/time.h"
 
 #include <stdbool.h>
 #include <commands.h>
+#include <stdlib.h>
+#include <string.h>
 
-uint8_t panel_tx_queue[PANEL_TX_QUEUE_SIZE];
+PanelPacket panel_tx_queue[PANEL_TX_QUEUE_SIZE];
 uint16_t panel_tx_queue_head = 0;
 uint16_t panel_tx_queue_tail = 0;
+uint16_t panel_tx_cursor = 0;
 
 #define PANEL_RX_BUF_SIZE 1024
 uint8_t rx_buf[PANEL_RX_BUF_SIZE];
-uint16_t rx_head = 0;
-uint16_t rx_tail = 0;
+uint16_t rx_cursor = 0;
+
+#define RX_PACKET_QUEUE_SIZE 16
+PanelPacket rx_packet_queue[RX_PACKET_QUEUE_SIZE];
+uint16_t rx_packet_queue_head = 0;
+uint16_t rx_packet_queue_tail = 0;
+
 bool rx_valid = true; // false if error found reading message
 
-uint16_t rx_push_tail = 0; // push_tail .. tail is the message to be pushed
-
-inline extern bool panel_putc(char c);
+inline extern bool panel_push(PanelPacket c);
 
 static void panel_irq_handler();
 
@@ -24,7 +31,7 @@ void panel_setup() {
   gpio_set_function(1, GPIO_FUNC_UART);
   uart_init(uart0, PANEL_BAUD);
   uart_set_format(uart0, 8, 2, UART_PARITY_NONE);
-  uart_set_fifo_enabled(uart0, true);
+  // uart_set_fifo_enabled(uart0, true); // because of the bug in pico-sdk, this breaks LCR_H STP2. note: enabled default.
   uart_set_irq_enables(uart0, true, true);
   irq_set_enabled(UART0_IRQ, true);
   irq_set_exclusive_handler(UART0_IRQ, panel_irq_handler);
@@ -43,26 +50,36 @@ void panel_setup() {
     ;
 }
 
-void panel_flush() {
-  while (uart_is_writable(uart0) && panel_tx_queue_head != panel_tx_queue_tail) {
-    uart_putc(uart0, panel_tx_queue[panel_tx_queue_tail]);
-    panel_tx_queue_tail = (panel_tx_queue_tail + 1) % PANEL_TX_QUEUE_SIZE;
+void panel_task() {
+  while (rx_packet_queue_head != rx_packet_queue_tail) {
+    if (commands_tx_push(rx_packet_queue[rx_packet_queue_tail])) {
+      rx_packet_queue_tail = (rx_packet_queue_tail + 1) % RX_PACKET_QUEUE_SIZE;
+    } else {
+      break;
+    }
   }
 }
 
-void panel_task() {
-  if (rx_push_tail != rx_tail) {
-    const uint16_t rx_tail_= rx_tail; // copy
-    uint16_t rx_count = (rx_tail_ + PANEL_RX_BUF_SIZE - rx_push_tail) % PANEL_RX_BUF_SIZE;
 
-    commands_tx_push(COMMAND_PREAMBLE);
-    commands_tx_push(COMMAND_TYPE_PANEL_SERIAL);
-    commands_tx_push(rx_count & 0xff);
-    commands_tx_push((rx_count >> 8) & 0xff);
-    while (rx_push_tail != rx_tail_) {
-      commands_tx_push(rx_buf[rx_push_tail++]);
-      rx_push_tail %= PANEL_RX_BUF_SIZE;
-    }
+int64_t panel_advance_next(alarm_id_t id, void* data) {
+  // pop
+  free(panel_tx_queue[panel_tx_queue_tail].data);
+  panel_tx_cursor = 0; // skip header
+  panel_tx_queue_tail = (panel_tx_queue_tail + 1) % PANEL_TX_QUEUE_SIZE;
+
+  panel_send_buf(); // start sending next
+  return 0;
+}
+
+void panel_send_buf() {
+  if (panel_tx_queue_head == panel_tx_queue_tail) return; // nothing to send
+  uint cnt = 0;
+  while (uart_is_writable(uart0) && panel_tx_cursor < panel_tx_queue[panel_tx_queue_tail].length) {
+    uart_putc(uart0, panel_tx_queue[panel_tx_queue_tail].data[panel_tx_cursor++]);
+    cnt++;
+  }
+  if (panel_tx_cursor == panel_tx_queue[panel_tx_queue_tail].length) {
+    alarm_pool_add_alarm_in_ms(alarm_pool_get_default(), 5, panel_advance_next, NULL, true);
   }
 }
 
@@ -71,9 +88,8 @@ static void panel_irq_handler() {
     while (uart_is_readable(uart0)) {
       const uint8_t ch = uart_getc(uart0);
       if (rx_valid) {
-        rx_buf[rx_head++] = ch;
-        rx_head %= PANEL_RX_BUF_SIZE;
-        if (rx_head == rx_push_tail) {
+        rx_buf[rx_cursor++] = ch;
+        if (rx_cursor == PANEL_RX_BUF_SIZE) {
           rx_valid = false;
         }
       }
@@ -81,15 +97,8 @@ static void panel_irq_handler() {
   }
 
   if (uart0_hw->ris & UART_UARTRIS_TXRIS_BITS) {
-    // write from queue
-    while (uart_is_writable(uart0) && panel_tx_queue_head != panel_tx_queue_tail) {
-      uart_putc(uart0, panel_tx_queue[panel_tx_queue_tail]);
-      panel_tx_queue_tail = (panel_tx_queue_tail + 1) % PANEL_TX_QUEUE_SIZE;
-    }
-    if (panel_tx_queue_head == panel_tx_queue_tail) {
-      // queue empty, disable TX irq
-      uart0_hw->icr = UART_UARTICR_TXIC_BITS;
-    }
+    uart0_hw->icr = UART_UARTICR_TXIC_BITS;
+    panel_send_buf();
   }
 
   // if any error
@@ -117,19 +126,29 @@ static void panel_irq_handler() {
     while (uart_is_readable(uart0)) {
       const uint8_t ch = uart_getc(uart0);
       if (rx_valid) {
-        rx_buf[rx_head++] = ch;
-        rx_head %= PANEL_RX_BUF_SIZE;
-        if (rx_head == rx_push_tail) {
+        rx_buf[rx_cursor++] = ch;
+        if (rx_cursor == PANEL_RX_BUF_SIZE) {
           rx_valid = false;
         }
       }
     }
 
-    if (rx_valid) {
-      rx_tail = rx_head;
-    } else {
-      rx_head = rx_tail;
+    if (rx_packet_queue_tail == ((rx_packet_queue_head + 1) % RX_PACKET_QUEUE_SIZE)) {
+      // queue full
+      rx_valid = false;
     }
+    if (rx_valid && rx_cursor > 0) {
+      CommandPacket* packet = &rx_packet_queue[rx_packet_queue_head]; // shorthand
+      packet->length = rx_cursor + 4;
+      packet->data = malloc(packet->length);
+      packet->data[0] = COMMAND_PREAMBLE;
+      packet->data[1] = COMMAND_TYPE_PANEL_SERIAL;
+      packet->data[2] = rx_cursor & 0xff;
+      packet->data[3] = (rx_cursor >> 8) & 0xff;
+      memcpy(packet->data + 4, rx_buf, rx_cursor);
+      rx_packet_queue_head = (rx_packet_queue_head + 1) % RX_PACKET_QUEUE_SIZE;
+    }
+    rx_cursor = 0;
     rx_valid = true;
   }
 }
