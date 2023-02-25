@@ -9,7 +9,8 @@
 #include <tusb_config.h>
 #include <bsp/board.h>
 
-#include <commands.h>
+#include <commands/parse.h>
+#include <commands/usb.h>
 #include <panel_serial.h>
 
 const uint LED_PIN = 25;
@@ -41,7 +42,8 @@ int main() {
     while (1) {
         tud_task(); // tinyusb device task
 
-        commands_task(); // process commands
+        commands_parse_task(); // process commands
+        command_usb_task();
         panel_task();
 
         if (tud_cdc_n_available(1)) {

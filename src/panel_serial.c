@@ -1,10 +1,10 @@
 #include "panel_serial.h"
-#include "pico/time.h"
 
+#include <pico/time.h>
 #include <stdbool.h>
-#include <commands.h>
 #include <stdlib.h>
 #include <string.h>
+#include <commands/commands.h>
 
 PanelPacket panel_tx_queue[PANEL_TX_QUEUE_SIZE];
 uint16_t panel_tx_queue_head = 0;

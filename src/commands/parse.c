@@ -1,29 +1,11 @@
-#include "commands.h"
-#include "class/cdc/cdc_device.h"
-#include "commands/usb.h"
-#include "device/usbd.h"
-#include "panel_serial.h"
+#include "parse.h"
 
-inline extern bool commands_rx_push(uint8_t c);
-inline extern bool commands_tx_push(CommandPacket c);
+#include <class/cdc/cdc_device.h>
+#include <device/usbd.h>
 
-CommandPacket COMMANDS_TX_QUEUE[COMMANDS_TX_QUEUE_SIZE];
-uint16_t commands_tx_head;
-uint16_t commands_tx_tail;
-uint16_t commands_tx_cursor;
+#include <commands/usb.h>
+#include <panel_serial.h>
 
-uint8_t COMMANDS_RX_BUFFER[COMMANDS_RX_BUFFER_SIZE];
-uint16_t commands_rx_head;
-uint16_t commands_rx_tail;
-
-void commands_init() {
-  commands_tx_head = 0;
-  commands_tx_tail = 0;
-  commands_tx_cursor = 0;
-
-  commands_rx_head = 0;
-  commands_rx_tail = 0;
-}
 
 typedef enum ParseState {
     NOT_ENOUGH_DATA,
@@ -33,8 +15,8 @@ typedef enum ParseState {
 
 inline extern ParseResult parse_command_panel_serial(uint len);
 
-void commands_task() {
-    command_usb_task();
+
+void commands_parse_task() {
     // decode packets
 
     // skip until header
@@ -65,27 +47,6 @@ void commands_task() {
             }
         } else break;
         if (!cont) break;
-    }
-
-    // TODO: switch interface dynamically
-
-    while (commands_tx_head != commands_tx_tail) {
-        uint n = tud_cdc_n_write_available(0);
-        if (n) {
-            if (COMMANDS_TX_QUEUE[commands_tx_tail].length - commands_tx_cursor < n) {
-                n = COMMANDS_TX_QUEUE[commands_tx_tail].length - commands_tx_cursor;
-            }
-
-            commands_tx_cursor += tud_cdc_n_write(0, COMMANDS_TX_QUEUE[commands_tx_tail].data + commands_tx_cursor, n);
-            if (commands_tx_cursor >= COMMANDS_TX_QUEUE[commands_tx_tail].length) {
-                free(COMMANDS_TX_QUEUE[commands_tx_tail].data);
-                commands_tx_tail = (commands_tx_tail + 1) % COMMANDS_TX_QUEUE_SIZE;
-                commands_tx_cursor = 0;
-            }
-        }
-
-        tud_task();
-        tud_cdc_n_write_flush(0);
     }
 }
 

@@ -28,6 +28,7 @@ typedef Segment CommandPacket;
 extern CommandPacket COMMANDS_TX_QUEUE[COMMANDS_TX_QUEUE_SIZE];
 extern uint16_t commands_tx_head;
 extern uint16_t commands_tx_tail;
+extern uint16_t commands_tx_cursor;
 
 extern uint8_t COMMANDS_RX_BUFFER[COMMANDS_RX_BUFFER_SIZE];
 extern uint16_t commands_rx_head;
@@ -35,12 +36,6 @@ extern uint16_t commands_rx_tail;
 
 // initialize for commands tasks
 void commands_init();
-
-/**
-  tasks called in main loop
-  mainly, parsing and sending messages are done here
-*/
-void commands_task();
 
 // push received commands to receive buffer
 inline bool commands_rx_push(uint8_t c) {
