@@ -60,8 +60,11 @@ void panel_task() {
   }
 }
 
+bool advance_timer_set = false;
 
 int64_t panel_advance_next(alarm_id_t id, void* data) {
+  if (!advance_timer_set) { return 0; }
+  advance_timer_set = false;
   // pop
   free(panel_tx_queue[panel_tx_queue_tail].data);
   panel_tx_cursor = 0; // skip header
@@ -78,7 +81,8 @@ void panel_send_buf() {
     uart_putc(uart0, panel_tx_queue[panel_tx_queue_tail].data[panel_tx_cursor++]);
     cnt++;
   }
-  if (panel_tx_cursor == panel_tx_queue[panel_tx_queue_tail].length) {
+  if (panel_tx_cursor == panel_tx_queue[panel_tx_queue_tail].length && !advance_timer_set) {
+    advance_timer_set = true;
     alarm_pool_add_alarm_in_ms(alarm_pool_get_default(), 5, panel_advance_next, NULL, true);
   }
 }
